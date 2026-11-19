@@ -386,6 +386,24 @@
   .switch.on::after{ transform:translateX(16px); }
 
 
+  .lb-section{margin:14px 0 4px;padding:12px 13px;border:1px solid var(--hair);border-radius:14px;background:rgba(255,255,255,0.045)}
+  .lb-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px}
+  .lb-join{display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:8px}
+  .lb-input{width:100%;min-width:0;min-height:38px;padding:8px 10px;border:1px solid var(--hair);border-radius:11px;background:rgba(255,255,255,.04);color:var(--parchment);font:500 .72rem 'Inter',sans-serif}
+  .lb-input::placeholder{color:var(--slate-dim)}
+  .lb-input:focus{outline:2px solid var(--brass);outline-offset:1px;border-color:var(--brass)}
+  .lb-me{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 8px;font-size:.74rem;color:var(--parchment)}
+  .lb-me .lb-you-name{font-weight:600;color:var(--brass)}
+  .lb-list{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto}
+  .lb-row{display:grid;grid-template-columns:22px 1fr auto;align-items:center;gap:8px;padding:7px 8px;border:1px solid var(--hair);border-radius:10px;font-size:.73rem;color:var(--parchment);background:rgba(255,255,255,.03)}
+  .lb-row.is-you{border-color:color-mix(in srgb,var(--brass) 55%, var(--hair));background:rgba(255,255,255,.06)}
+  .lb-rank{color:var(--slate-dim);font-variant-numeric:tabular-nums}
+  .lb-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lb-time{color:var(--brass);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .lb-empty{margin:6px 0 0;color:var(--slate);font-size:.72rem;line-height:1.4}
+  .lb-inline-btn{min-height:30px;padding:4px 10px;font-size:.68rem}
+  .lb-section .panel-action{min-width:72px}
+  .lb-section .lb-small{font-size:.68rem;color:var(--slate-dim);line-height:1.4;margin:0 0 8px}
   .share-modal[hidden]{display:none}
   .share-modal{
     position:fixed;inset:0;z-index:50;display:grid;place-items:center;
@@ -515,6 +533,25 @@
     <span>Tick tock while running</span>
     <button class="switch" id="tickSwitch" aria-label="Toggle tick tock sound" aria-pressed="false"></button>
   </div>
+
+  <div class="lb-section" id="leaderboardSection">
+    <div class="lb-head">
+      <div><span class="summary-label">Live leaderboard</span><strong style="display:block;color:var(--parchment);font:500 1.05rem 'Fraunces',serif">Focus hours</strong></div>
+      <button class="panel-action lb-inline-btn" id="lbRefreshBtn" type="button">Refresh</button>
+    </div>
+    <p class="lb-small">Time syncs while you focus. Set your name once on this device.</p>
+    <div id="lbJoinWrap" class="lb-join">
+      <input class="lb-input" id="lbNameInput" type="text" maxlength="24" placeholder="Your name" aria-label="Leaderboard name">
+      <button class="panel-action" id="lbJoinBtn" type="button">Join</button>
+    </div>
+    <div id="lbMeWrap" class="lb-me" hidden>
+      <span>You: <span class="lb-you-name" id="lbYouName"></span> <span id="lbYouTime"></span></span>
+      <button class="panel-action lb-inline-btn" id="lbChangeNameBtn" type="button">Change</button>
+    </div>
+    <p class="panel-status" id="lbStatus" role="status" aria-live="polite"></p>
+    <ol class="lb-list" id="lbList"></ol>
+    <p class="lb-empty" id="lbEmpty">Loading leaderboard...</p>
+  </div>
 </div>
 
 <div class="share-modal" id="shareModal" hidden>
@@ -583,6 +620,15 @@
   var completedFocusSessions = 0;
   var tickTockOn = false;
   var tickToggle = true;
+
+  var LB_API_BASE = 'https://meridian-s5cw.onrender.com';
+  var lbUserId = '';
+  var lbUserName = '';
+  var lbServerSeconds = null;
+  var lbFocusAccumulator = 0;
+  var lbTickInFlight = false;
+  var lbPollTimer = null;
+  var lbLastTickAttempt = 0;
 
   var audioCtx = null;
   function getAudioCtx(){
@@ -711,6 +757,7 @@
       renderFocusTotal();
     }
     saveSettings();
+    lbMaybeTick();
     if(tickTockOn){
       tickToggle = !tickToggle;
       playTick(tickToggle);
@@ -798,6 +845,17 @@
   var grainVal = document.getElementById('grainVal');
   var tickSwitch = document.getElementById('tickSwitch');
   var themeButtons = document.querySelectorAll('[data-theme-choice]');
+  var lbNameInput = document.getElementById('lbNameInput');
+  var lbJoinBtn = document.getElementById('lbJoinBtn');
+  var lbRefreshBtn = document.getElementById('lbRefreshBtn');
+  var lbChangeNameBtn = document.getElementById('lbChangeNameBtn');
+  var lbJoinWrap = document.getElementById('lbJoinWrap');
+  var lbMeWrap = document.getElementById('lbMeWrap');
+  var lbYouName = document.getElementById('lbYouName');
+  var lbYouTime = document.getElementById('lbYouTime');
+  var lbStatus = document.getElementById('lbStatus');
+  var lbList = document.getElementById('lbList');
+  var lbEmpty = document.getElementById('lbEmpty');
   function updateFavicon(theme){
     var palette={
       mani:{paper:'#F3ECDD',ink:'20,17,13',progress:'#B8823C'},
@@ -831,6 +889,133 @@
   var shareFocusBtn = document.getElementById('shareFocusBtn');
   var fullscreenBtn = document.getElementById('fullscreenBtn');
   var panelStatus = document.getElementById('panelStatus');
+
+  function lbSetStatus(msg){ if(lbStatus) lbStatus.textContent = msg || ''; }
+  function lbUpdateIdentityUI(){
+    var hasUser = !!(lbUserId && lbUserName);
+    if(lbJoinWrap) lbJoinWrap.hidden = hasUser;
+    if(lbMeWrap) lbMeWrap.hidden = !hasUser;
+    if(hasUser){
+      if(lbYouName) lbYouName.textContent = lbUserName;
+      if(lbYouTime) lbYouTime.textContent = lbServerSeconds != null ? ('? ' + formatFocusTime(lbServerSeconds)) : '';
+    }
+  }
+  function lbRenderList(items){
+    if(!lbList || !lbEmpty) return;
+    lbList.innerHTML = '';
+    if(!items || !items.length){
+      lbEmpty.hidden = false;
+      lbEmpty.textContent = 'No entries yet. Join and start focusing to appear here.';
+      return;
+    }
+    lbEmpty.hidden = true;
+    items.forEach(function(item, idx){
+      var li = document.createElement('li');
+      var name = String(item.name || 'Unknown');
+      var secs = Number(item.totalSeconds != null ? item.totalSeconds : item.seconds);
+      if(!Number.isFinite(secs)) secs = 0;
+      var isYou = (lbUserId && String(item.userId || item.id || '') === String(lbUserId)) || (lbUserName && name.toLowerCase() === lbUserName.toLowerCase());
+      li.className = 'lb-row' + (isYou ? ' is-you' : '');
+      li.innerHTML = '<span class="lb-rank">'+(idx+1)+'</span><span class="lb-name"></span><span class="lb-time"></span>';
+      li.querySelector('.lb-name').textContent = name + (isYou ? ' (you)' : '');
+      li.querySelector('.lb-time').textContent = formatFocusTime(secs);
+      lbList.appendChild(li);
+      if(isYou){ lbServerSeconds = secs; }
+    });
+    lbUpdateIdentityUI();
+  }
+  async function lbApi(path, opts){
+    opts = opts || {};
+    var headers = Object.assign({}, opts.headers || {});
+    if(opts.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    var res = await fetch(LB_API_BASE + path, Object.assign({}, opts, { headers: headers }));
+    var text = await res.text();
+    var data = null;
+    try{ data = text ? JSON.parse(text) : null; }catch(e){ data = text; }
+    if(!res.ok){
+      var msg = (data && (data.error || data.message)) ? (data.error || data.message) : ('Request failed ('+res.status+')');
+      var err = new Error(msg); err.status = res.status; err.data = data; throw err;
+    }
+    return data;
+  }
+  async function lbFetchLeaderboard(){
+    try{
+      var data = await lbApi('/leaderboard', { method: 'GET' });
+      var items = Array.isArray(data) ? data : (data && (data.leaderboard || data.users || data.items)) || [];
+      items = items.slice().sort(function(a,b){
+        var as = Number(a.totalSeconds != null ? a.totalSeconds : a.seconds) || 0;
+        var bs = Number(b.totalSeconds != null ? b.totalSeconds : b.seconds) || 0;
+        return bs - as;
+      });
+      lbRenderList(items);
+      if(lbStatus && /Loading|Failed|Could not|unavailable|error/i.test(lbStatus.textContent||'')) lbSetStatus('');
+    }catch(e){
+      if(!lbList || !lbList.children.length){ if(lbEmpty){ lbEmpty.hidden = false; lbEmpty.textContent = 'Leaderboard unavailable right now.'; } }
+      lbSetStatus('Leaderboard unavailable right now.');
+    }
+  }
+  async function lbJoin(){
+    var name = (lbNameInput && lbNameInput.value || '').trim();
+    if(!name){ lbSetStatus('Enter a name to join.'); return; }
+    lbSetStatus('Joining...');
+    try{
+      var data = await lbApi('/join', { method: 'POST', body: JSON.stringify({ name: name }) });
+      data = data || {};
+      var user = data.user || data;
+      lbUserId = String(user.userId || user.id || data.userId || data.id || '');
+      lbUserName = String(user.name || data.name || name);
+      if(user.totalSeconds != null) lbServerSeconds = Number(user.totalSeconds) || 0;
+      if(!lbUserId){ throw new Error('Could not join'); }
+      if(lbNameInput) lbNameInput.value = '';
+      lbUpdateIdentityUI();
+      saveSettings();
+      lbSetStatus('Joined as ' + lbUserName + '.');
+      lbFetchLeaderboard();
+    }catch(e){
+      lbSetStatus(e && e.message ? e.message : 'Could not join leaderboard.');
+    }
+  }
+  async function lbSendTick(){
+    if(!lbUserId) return;
+    if(lbTickInFlight) return;
+    var now = Date.now();
+    if(now - lbLastTickAttempt < 5000) return;
+    if(lbFocusAccumulator < 30) return;
+    lbTickInFlight = true;
+    lbLastTickAttempt = now;
+    try{
+      var data = await lbApi('/tick', { method: 'POST', body: JSON.stringify({ userId: lbUserId, seconds: 30 }) });
+      lbFocusAccumulator = Math.max(0, lbFocusAccumulator - 30);
+      if(data && data.totalSeconds != null){ lbServerSeconds = Number(data.totalSeconds) || lbServerSeconds; }
+      else if(lbServerSeconds != null){ lbServerSeconds += 30; }
+      lbUpdateIdentityUI();
+      if(lbStatus && /unavailable|Could not/i.test(lbStatus.textContent||'')) lbSetStatus('');
+    }catch(e){
+      // keep accumulator to retry later
+    }finally{
+      lbTickInFlight = false;
+    }
+  }
+  function lbMaybeTick(){
+    if(running && mode === 'focus'){ lbFocusAccumulator += 1; }
+    if(lbFocusAccumulator >= 30){ lbSendTick(); }
+  }
+  function lbStartPolling(){
+    if(lbPollTimer) clearInterval(lbPollTimer);
+    lbPollTimer = setInterval(function(){ lbFetchLeaderboard(); }, 30000);
+  }
+  function lbInit(){
+    lbUpdateIdentityUI();
+    if(lbJoinBtn) lbJoinBtn.addEventListener('click', lbJoin);
+    if(lbNameInput) lbNameInput.addEventListener('keydown', function(e){ if(e.key === 'Enter'){ e.preventDefault(); lbJoin(); } });
+    if(lbRefreshBtn) lbRefreshBtn.addEventListener('click', function(){ lbFetchLeaderboard(); });
+    if(lbChangeNameBtn) lbChangeNameBtn.addEventListener('click', function(){
+      lbUserId = ''; lbUserName = ''; lbServerSeconds = null; saveSettings(); lbUpdateIdentityUI(); lbSetStatus('Name cleared on this device. You can join again.'); lbFetchLeaderboard();
+    });
+    lbRenderList([]);
+    lbFetchLeaderboard();
+    lbStartPolling();
+  }
   function updateFullscreenButton(){
     var active = !!document.fullscreenElement;
     fullscreenBtn.textContent = active ? 'Exit fullscreen' : 'Go fullscreen';
@@ -994,7 +1179,7 @@
 
   function saveSettings(){
     try{
-      localStorage.setItem('meridian-fx', JSON.stringify({ blur:blurSlider.value, grain:grainSlider.value, tick:tickTockOn, theme:document.documentElement.dataset.theme, mode:mode, remaining:remaining, totalFocusSeconds:totalFocusSeconds }));
+      localStorage.setItem('meridian-fx', JSON.stringify({ blur:blurSlider.value, grain:grainSlider.value, tick:tickTockOn, theme:document.documentElement.dataset.theme, mode:mode, remaining:remaining, totalFocusSeconds:totalFocusSeconds, lbUserId:lbUserId, lbUserName:lbUserName, lbServerSeconds:lbServerSeconds }));
     }catch(e){}
   }
 
@@ -1056,9 +1241,13 @@
           tickSwitch.classList.toggle('on', tickTockOn);
           tickSwitch.setAttribute('aria-pressed', String(tickTockOn));
         }
+        if(s.lbUserId !== undefined){ lbUserId = String(s.lbUserId || ''); }
+        if(s.lbUserName !== undefined){ lbUserName = String(s.lbUserName || ''); }
+        if(Number.isFinite(Number(s.lbServerSeconds))){ lbServerSeconds = Math.max(0, Math.floor(Number(s.lbServerSeconds))); }
       }
     }catch(e){}
   })();
+  lbInit();
 })();
 </script>
 </body>

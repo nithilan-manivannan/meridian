@@ -386,24 +386,23 @@
   .switch.on::after{ transform:translateX(16px); }
 
 
-  .lb-section{margin:14px 0 4px;padding:12px 13px;border:1px solid var(--hair);border-radius:14px;background:rgba(255,255,255,0.045)}
+  .lb-section{margin:14px 0 4px;padding:12px 13px;border:1px solid var(--hair);border-radius:14px;background:rgba(255,255,255,0.045);font-family:'Inter',sans-serif}
   .lb-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px}
   .lb-join{display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:8px}
   .lb-input{width:100%;min-width:0;min-height:38px;padding:8px 10px;border:1px solid var(--hair);border-radius:11px;background:rgba(255,255,255,.04);color:var(--parchment);font:500 .72rem 'Inter',sans-serif}
   .lb-input::placeholder{color:var(--slate-dim)}
   .lb-input:focus{outline:2px solid var(--brass);outline-offset:1px;border-color:var(--brass)}
-  .lb-me{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 8px;font-size:.74rem;color:var(--parchment)}
-  .lb-me .lb-you-name{font-weight:600;color:var(--brass)}
+  .lb-me{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin:4px 0 8px}
   .lb-list{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto}
-  .lb-row{display:grid;grid-template-columns:22px 1fr auto;align-items:center;gap:8px;padding:7px 8px;border:1px solid var(--hair);border-radius:10px;font-size:.73rem;color:var(--parchment);background:rgba(255,255,255,.03)}
+  .lb-row{display:grid;grid-template-columns:22px 1fr auto;align-items:center;gap:8px;padding:7px 8px;border:1px solid var(--hair);border-radius:10px;font-size:.73rem;color:var(--parchment);background:rgba(255,255,255,.03);font-family:'Inter',sans-serif}
   .lb-row.is-you{border-color:color-mix(in srgb,var(--brass) 55%, var(--hair));background:rgba(255,255,255,.06)}
   .lb-rank{color:var(--slate-dim);font-variant-numeric:tabular-nums}
   .lb-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .lb-time{color:var(--brass);font-variant-numeric:tabular-nums;white-space:nowrap}
-  .lb-empty{margin:6px 0 0;color:var(--slate);font-size:.72rem;line-height:1.4}
-  .lb-inline-btn{min-height:30px;padding:4px 10px;font-size:.68rem}
-  .lb-section .panel-action{min-width:72px}
-  .lb-section .lb-small{font-size:.68rem;color:var(--slate-dim);line-height:1.4;margin:0 0 8px}
+  .lb-empty{margin:6px 0 0;color:var(--slate);font-size:.72rem;line-height:1.4;font-family:'Inter',sans-serif}
+  .lb-inline-btn{min-height:30px;padding:4px 10px;font-size:.68rem;font-family:'Inter',sans-serif}
+  .lb-section .panel-action{min-width:72px;font-family:'Inter',sans-serif}
+  .lb-section .lb-small{font-size:.68rem;color:var(--slate-dim);line-height:1.4;margin:0 0 8px;font-family:'Inter',sans-serif}
   .share-modal[hidden]{display:none}
   .share-modal{
     position:fixed;inset:0;z-index:50;display:grid;place-items:center;
@@ -545,8 +544,7 @@
       <button class="panel-action" id="lbJoinBtn" type="button">Join</button>
     </div>
     <div id="lbMeWrap" class="lb-me" hidden>
-      <span>You: <span class="lb-you-name" id="lbYouName"></span> <span id="lbYouTime"></span></span>
-      <button class="panel-action lb-inline-btn" id="lbChangeNameBtn" type="button">Change</button>
+      <button class="panel-action lb-inline-btn" id="lbChangeNameBtn" type="button">Change name</button>
     </div>
     <p class="panel-status" id="lbStatus" role="status" aria-live="polite"></p>
     <ol class="lb-list" id="lbList"></ol>
@@ -851,8 +849,6 @@
   var lbChangeNameBtn = document.getElementById('lbChangeNameBtn');
   var lbJoinWrap = document.getElementById('lbJoinWrap');
   var lbMeWrap = document.getElementById('lbMeWrap');
-  var lbYouName = document.getElementById('lbYouName');
-  var lbYouTime = document.getElementById('lbYouTime');
   var lbStatus = document.getElementById('lbStatus');
   var lbList = document.getElementById('lbList');
   var lbEmpty = document.getElementById('lbEmpty');
@@ -895,10 +891,6 @@
     var hasUser = !!(lbUserId && lbUserName);
     if(lbJoinWrap) lbJoinWrap.hidden = hasUser;
     if(lbMeWrap) lbMeWrap.hidden = !hasUser;
-    if(hasUser){
-      if(lbYouName) lbYouName.textContent = lbUserName;
-      if(lbYouTime) lbYouTime.textContent = lbServerSeconds != null ? ('? ' + formatFocusTime(lbServerSeconds)) : '';
-    }
   }
   function lbRenderList(items){
     if(!lbList || !lbEmpty) return;

@@ -92,34 +92,6 @@ app.post('/tick', async (req, res) => {
   }
 });
 
-// Sync total focus seconds. Keeps the higher value so legacy/local totals are preserved.
-app.post('/sync', async (req, res) => {
-  try {
-    const userId = String((req.body && req.body.userId) || '');
-    const incoming = Number(req.body && req.body.totalSeconds);
-
-    if (!mongoose.isValidObjectId(userId)) {
-      return res.status(400).json({ error: 'Invalid userId' });
-    }
-    if (!Number.isFinite(incoming) || incoming < 0) {
-      return res.status(400).json({ error: 'Invalid totalSeconds' });
-    }
-
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    const safeIncoming = Math.max(0, Math.floor(incoming));
-    if (safeIncoming > (user.totalSeconds || 0)) {
-      user.totalSeconds = safeIncoming;
-      await user.save();
-    }
-
-    res.json({ userId: String(user._id), totalSeconds: user.totalSeconds || 0 });
-  } catch (e) {
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
 app.get('/', (req, res) => res.send('Meridian leaderboard API is running'));
 
 const port = process.env.PORT || 3000;

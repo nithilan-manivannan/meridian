@@ -663,13 +663,16 @@ html[data-theme="vajnch"] .bg-scrim{background:rgba(7,9,11,var(--scrim));}
     return minutes+'m';
   }
   function getDisplayedFocusSeconds(){
+    if(lbUserId && lbUserName && lbServerSeconds != null){
+      return Math.max(0, Math.floor(Number(lbServerSeconds) || 0));
+    }
     return Math.max(0, Math.floor(Number(totalFocusSeconds) || 0));
   }
   function renderFocusTotal(){
     var displaySeconds = getDisplayedFocusSeconds();
     if(focusTotalEl){ focusTotalEl.textContent = formatFocusTime(displaySeconds); }
     var note = document.getElementById('focusTotalNote');
-    if(note){ note.textContent = (lbUserId && lbUserName) ? 'Local leaderboard total' : 'Saved on this device'; }
+    if(note){ note.textContent = (lbUserId && lbUserName) ? 'Synced leaderboard total' : 'Join leaderboard to sync time'; }
     var ownTime = document.querySelector('#lbList .lb-row.is-you .lb-time');
     if(ownTime){ ownTime.textContent = formatFocusTime(displaySeconds); }
   }
@@ -705,6 +708,7 @@ html[data-theme="vajnch"] .bg-scrim{background:rgba(7,9,11,var(--scrim));}
   var lbServerSeconds = null;
   var lbFocusAccumulator = 0;
   var lbTickInFlight = false;
+  var lbSyncInFlight = false;
   var lbPollTimer = null;
   var lbLastTickAttempt = 0;
 
@@ -998,9 +1002,13 @@ html[data-theme="vajnch"] .bg-scrim{background:rgba(7,9,11,var(--scrim));}
     return !!((lbUserId && String(item.userId || item.id || '') === String(lbUserId)) || (lbUserName && name.toLowerCase() === lbUserName.toLowerCase()));
   }
   function lbLeaderboardSeconds(item){
-    if(lbIsCurrentUser(item)) return getDisplayedFocusSeconds();
     var seconds = Number(item && (item.totalSeconds != null ? item.totalSeconds : item.seconds));
-    return Number.isFinite(seconds) ? seconds : 0;
+    if(!Number.isFinite(seconds)) seconds = 0;
+    if(lbIsCurrentUser(item)){
+      if(lbServerSeconds != null) return Math.max(0, Math.floor(Number(lbServerSeconds) || 0));
+      return Math.max(0, Math.floor(seconds));
+    }
+    return Math.max(0, Math.floor(seconds));
   }
   function lbRenderList(items){
     if(!lbList || !lbEmpty) return;
@@ -1028,9 +1036,11 @@ html[data-theme="vajnch"] .bg-scrim{background:rgba(7,9,11,var(--scrim));}
       li.querySelector('.lb-name').textContent = name + (isYou ? ' (you)' : '');
       li.querySelector('.lb-time').textContent = formatFocusTime(secs);
       lbList.appendChild(li);
-      if(isYou && !item._localOnly) lbServerSeconds = serverSeconds;
+      if(isYou && !item._localOnly) lbServerSeconds = Math.max(0, Math.floor(Number(serverSeconds) || 0));
     });
+    if(lbUserId && lbUserName && lbServerSeconds != null) totalFocusSeconds = lbServerSeconds;
     lbUpdateIdentityUI();
+    renderFocusTotal();
   }
   async function lbApi(path, opts){
     opts = opts || {};
@@ -1057,6 +1067,30 @@ html[data-theme="vajnch"] .bg-scrim{background:rgba(7,9,11,var(--scrim));}
       lbSetStatus('Leaderboard unavailable right now.');
     }
   }
+  async function lbSyncTotal(force){
+    if(!lbUserId) return null;
+    if(lbSyncInFlight) return null;
+    var localTotal = Math.max(0, Math.floor(Number(totalFocusSeconds) || 0));
+    var serverTotal = lbServerSeconds == null ? -1 : Math.max(0, Math.floor(Number(lbServerSeconds) || 0));
+    if(!force && localTotal <= serverTotal) return lbServerSeconds;
+    lbSyncInFlight = true;
+    try{
+      var data = await lbApi('/sync', { method: 'POST', body: JSON.stringify({ userId: lbUserId, totalSeconds: localTotal }) });
+      if(data && data.totalSeconds != null){
+        lbServerSeconds = Math.max(0, Math.floor(Number(data.totalSeconds) || 0));
+      }
+      // Once synced, DB is the source of truth; keep local timer total aligned.
+      if(lbServerSeconds != null) totalFocusSeconds = lbServerSeconds;
+      saveSettings();
+      renderFocusTotal();
+      return lbServerSeconds;
+    }catch(e){
+      if(force) lbSetStatus(e && e.message ? e.message : 'Could not sync focus time.');
+      return null;
+    }finally{
+      lbSyncInFlight = false;
+    }
+  }
   async function lbJoin(){
     var name = (lbNameInput && lbNameInput.value || '').trim();
     if(!name){ lbSetStatus('Enter a name to join.'); return; }
@@ -1067,10 +1101,11 @@ html[data-theme="vajnch"] .bg-scrim{background:rgba(7,9,11,var(--scrim));}
       var user = data.user || data;
       lbUserId = String(user.userId || user.id || data.userId || data.id || '');
       lbUserName = String(user.name || data.name || name);
-      if(user.totalSeconds != null) lbServerSeconds = Number(user.totalSeconds) || 0;
+      if(user.totalSeconds != null) lbServerSeconds = Math.max(0, Math.floor(Number(user.totalSeconds) || 0));
       if(!lbUserId){ throw new Error('Could not join'); }
       if(lbNameInput) lbNameInput.value = '';
       lbUpdateIdentityUI();
+      await lbSyncTotal(true);
       saveSettings();
       lbSetStatus('Joined as ' + lbUserName + '.');
       lbFetchLeaderboard();
@@ -1086,18 +1121,31 @@ html[data-theme="vajnch"] .bg-scrim{background:rgba(7,9,11,var(--scrim));}
     if(lbFocusAccumulator < 30) return;
     lbTickInFlight = true;
     lbLastTickAttempt = now;
+    var secondsToSend = Math.max(1, Math.min(60, Math.floor(lbFocusAccumulator / 30) * 30));
     try{
-      var data = await lbApi('/tick', { method: 'POST', body: JSON.stringify({ userId: lbUserId, seconds: 30 }) });
-      lbFocusAccumulator = Math.max(0, lbFocusAccumulator - 30);
-      if(data && data.totalSeconds != null){ lbServerSeconds = Number(data.totalSeconds) || lbServerSeconds; }
-      else if(lbServerSeconds != null){ lbServerSeconds += 30; }
+      var data = await lbApi('/tick', { method: 'POST', body: JSON.stringify({ userId: lbUserId, seconds: secondsToSend }) });
+      if(data && data.ignored){
+        // Server ignored duplicate/too-soon tick; keep accumulator for retry.
+      } else {
+        lbFocusAccumulator = Math.max(0, lbFocusAccumulator - secondsToSend);
+        if(data && data.totalSeconds != null){ lbServerSeconds = Math.max(0, Math.floor(Number(data.totalSeconds) || 0)); }
+        else if(lbServerSeconds != null){ lbServerSeconds += secondsToSend; }
+        if(lbServerSeconds != null) totalFocusSeconds = lbServerSeconds;
+      }
       lbUpdateIdentityUI();
-      if(lbStatus && /unavailable|Could not/i.test(lbStatus.textContent||'')) lbSetStatus('');
+      saveSettings();
+      renderFocusTotal();
+      lbFetchLeaderboard();
     }catch(e){
-      // keep accumulator to retry later
+      lbSetStatus('Sync delayed. Will retry.');
     }finally{
       lbTickInFlight = false;
     }
+  }
+  function lbMaybeTick(){
+    if(running && mode === 'focus'){ lbFocusAccumulator += 1; }
+    if(lbFocusAccumulator >= 30){ lbSendTick(); }
+  }
   }
   function lbMaybeTick(){
     if(running && mode === 'focus'){ lbFocusAccumulator += 1; }
@@ -1289,7 +1337,28 @@ html[data-theme="vajnch"] .bg-scrim{background:rgba(7,9,11,var(--scrim));}
 
   function saveSettings(){
     try{
-      localStorage.setItem('meridian-fx', JSON.stringify({ blur:blurSlider.value, grain:grainSlider.value, tick:tickTockOn, theme:document.documentElement.dataset.theme, mode:mode, remaining:remaining, totalFocusSeconds:totalFocusSeconds, lbUserId:lbUserId, lbUserName:lbUserName, lbServerSeconds:lbServerSeconds }));
+      var existing = {};
+      try { existing = JSON.parse(localStorage.getItem('meridian-fx') || '{}') || {}; } catch(e2) { existing = {}; }
+      localStorage.setItem('meridian-fx', JSON.stringify({
+        blur:blurSlider.value,
+        grain:grainSlider.value,
+        tick:tickTockOn,
+        theme:document.documentElement.dataset.theme,
+        mode:mode,
+        remaining:remaining,
+        // Timekeeping is DB-backed; do not persist local focus totals.
+        lbUserId:lbUserId,
+        lbUserName:lbUserName,
+        lbServerSeconds:lbServerSeconds,
+        totalFocusSeconds: undefined
+      }));
+      // Clean legacy key if present in previously stored object.
+      if(existing && Object.prototype.hasOwnProperty.call(existing,'totalFocusSeconds')){
+        try{
+          var cleaned = JSON.parse(localStorage.getItem('meridian-fx') || '{}') || {};
+          if(Object.prototype.hasOwnProperty.call(cleaned,'totalFocusSeconds')){ delete cleaned.totalFocusSeconds; localStorage.setItem('meridian-fx', JSON.stringify(cleaned)); }
+        }catch(e3){}
+      }
     }catch(e){}
   }
 
@@ -1333,8 +1402,9 @@ html[data-theme="vajnch"] .bg-scrim{background:rgba(7,9,11,var(--scrim));}
             : (mode === 'focus' ? 'Start focusing' : 'Start break');
         }
         if(Number.isFinite(Number(s.totalFocusSeconds))){
+          // Legacy migration: keep in memory only until we can sync to DB.
           totalFocusSeconds = Math.max(0,Math.floor(Number(s.totalFocusSeconds)));
-          renderFocusTotal();
+          setTimeout(saveSettings,0);
         }
         if(s.blur !== undefined){
           blurSlider.value = s.blur;
@@ -1354,12 +1424,14 @@ html[data-theme="vajnch"] .bg-scrim{background:rgba(7,9,11,var(--scrim));}
         if(s.lbUserId !== undefined){ lbUserId = String(s.lbUserId || ''); }
         if(s.lbUserName !== undefined){ lbUserName = String(s.lbUserName || ''); }
         if(Number.isFinite(Number(s.lbServerSeconds))){ lbServerSeconds = Math.max(0, Math.floor(Number(s.lbServerSeconds))); }
+        if(lbServerSeconds != null) totalFocusSeconds = lbServerSeconds;
         lbSyncVajnchThemeOption();
         if(s.theme !== undefined){ applyTheme(s.theme); }
       }
     }catch(e){}
   })();
   lbInit();
+  if(lbUserId){ lbSyncTotal(true).then(function(){ lbFetchLeaderboard(); }).catch(function(){ lbFetchLeaderboard(); }); }
 })();
 </script>
 </body>

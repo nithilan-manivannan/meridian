@@ -988,6 +988,9 @@ html[data-theme="vajnch"] .bg-scrim{background:rgba(7,9,11,var(--scrim));}
     var hasUser = !!(lbUserId && lbUserName);
     if(lbJoinWrap) lbJoinWrap.hidden = hasUser;
     if(lbMeWrap) lbMeWrap.hidden = !hasUser;
+    if(lbList) lbList.hidden = !hasUser;
+    if(lbEmpty) lbEmpty.hidden = !hasUser;
+    if(lbRefreshBtn) lbRefreshBtn.hidden = !hasUser;
     var currentName = document.getElementById('lbCurrentName');
     if(currentName) currentName.textContent = lbUserName || '';
     renderFocusTotal();
@@ -1048,6 +1051,12 @@ html[data-theme="vajnch"] .bg-scrim{background:rgba(7,9,11,var(--scrim));}
     return data;
   }
   async function lbFetchLeaderboard(){
+    if(!(lbUserId && lbUserName)){
+      if(lbList){ lbList.innerHTML = ''; lbList.hidden = true; }
+      if(lbEmpty){ lbEmpty.hidden = true; lbEmpty.textContent = ''; }
+      lbSetStatus('Database temporarily unavailable. Please try again later.');
+      return;
+    }
     try{
       var data = await lbApi('/leaderboard', { method: 'GET' });
       var items = Array.isArray(data) ? data : (data && (data.leaderboard || data.users || data.items)) || [];

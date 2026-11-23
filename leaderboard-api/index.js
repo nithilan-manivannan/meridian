@@ -33,7 +33,7 @@ app.post('/join', async (req, res) => {
     const nameKey = name.toLowerCase();
     let user = await User.findOne({ nameKey });
     if (!user) {
-      user = await User.create({ name, nameKey, totalSeconds: 0 });
+      return res.status(503).json({ error: 'Database temporarily unavailable. Please try again later.' });
     }
     res.json(toUser(user));
   } catch (e) {
